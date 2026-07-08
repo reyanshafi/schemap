@@ -27,7 +27,7 @@
                               mapping, progress     embed token  │ rows / rollback
                                     │                    │       │
 ┌───────────────────────────────────▼────────────────────▼───────┼─────────────┐
-│ SCHEMAP CLOUD                     API SERVICE (Fastify)        │             │
+│ SCHEMAP CLOUD                     API SERVICE (Express)        │             │
 │                    auth · embed tokens · REST · SSE progress   │             │
 │                                        │ enqueue jobs          │             │
 │        ┌───────────────┬───────────────┼──────────────┬────────┴──┐          │
@@ -60,7 +60,7 @@
 ```
 schemap/
 ├── apps/
-│   ├── api/          # Fastify REST API + SSE
+│   ├── api/          # Express REST API + SSE
 │   ├── worker/       # BullMQ queue consumers
 │   └── dashboard/    # Next.js developer dashboard
 ├── packages/
@@ -179,11 +179,11 @@ Workers `INCR` Redis counters (`import:{id}:processed`, `:failed`, `:delivered`)
 
 | | Local dev | Production (MVP) |
 |---|---|---|
-| API + Worker | `pnpm dev` (two processes) | Railway/Render: 1 API instance + 1 worker instance (scale count later) |
+| API + Worker | `npm run dev` (two processes) | Railway/Render: 1 API instance + 1 worker instance (scale count later) |
 | Postgres | docker-compose | Managed Postgres (Railway/Neon) |
 | Redis | docker-compose | Managed Redis (Railway/Upstash) |
 | Object storage | MinIO in docker-compose | Cloudflare R2 (S3 API, free egress) |
-| Dashboard | `pnpm dev` | Vercel |
+| Dashboard | `npm run dev` | Vercel |
 | CI/CD | — | GitHub Actions: lint, typecheck, tests, docker build, deploy on main |
 
 The self-hosted edition (P2) is the same `docker-compose.yml` shape with all services pinned — designing dev like prod-in-miniature from day one is what makes self-hosting cheap to offer later.
@@ -204,10 +204,10 @@ The self-hosted edition (P2) is the same `docker-compose.yml` shape with all ser
 
 | Choice | Why |
 |---|---|
-| Fastify (not Express) | Faster, first-class TypeScript + JSON-schema validation, modern plugins |
+| Express 5 (not Fastify) | Team familiarity, largest middleware ecosystem, every integrating developer knows it; perf difference is irrelevant at our request rates (heavy work is in workers). Zod middleware supplies the validation Fastify would have given us |
 | BullMQ (not Kafka/RabbitMQ) | Right-sized: Redis already present, delayed jobs + retries + rate limiting built in; Kafka is overkill at this scale |
 | Postgres staging rows (not re-reading the file) | Enables the review/fix UI, resumable validation, per-row status — the file becomes read-once |
 | SSE (not WebSockets) | One-directional progress needs no bidirectional channel; SSE survives proxies better and is trivial to serve |
 | Presigned direct-to-storage uploads | API stays stateless; no 100MB bodies through Node; free bandwidth on R2 |
-| pnpm + Turborepo monorepo | SDK, API, worker share `packages/core` types — one source of truth for schema/validation logic |
+| npm workspaces monorepo | SDK, API, worker share `packages/core` types — one source of truth for schema/validation logic; npm is zero extra tooling |
 | Zod everywhere | Same validation definitions serve API input checking and import field validation |
