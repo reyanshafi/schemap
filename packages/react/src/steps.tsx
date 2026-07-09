@@ -38,11 +38,48 @@ export function UploadStep(props: {
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
       >
-        <p style={{ margin: 0, fontWeight: 600 }}>Drop your CSV here</p>
-        <p style={s.muted}>or click to choose a file (up to 100 MB)</p>
-        <input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={onPick} />
+        <p style={{ margin: 0, fontWeight: 600 }}>Drop your file here</p>
+        <p style={s.muted}>CSV or Excel (.xlsx), up to 100 MB</p>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          hidden
+          onChange={onPick}
+        />
       </div>
       {props.error && <p style={s.error}>{props.error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- sheet picker (XLSX)
+
+export function SheetPickerStep(props: {
+  s: Styles;
+  sheets: string[];
+  error: string | null;
+  busy: boolean;
+  onChoose: (sheetName: string) => void;
+}): ReactElement {
+  const { s } = props;
+  const [selected, setSelected] = useState(props.sheets[0] ?? "");
+
+  return (
+    <div>
+      <h3 style={s.h}>Choose a sheet</h3>
+      <p style={s.muted}>This workbook has {props.sheets.length} sheets — which one has your data?</p>
+      <select style={{ ...s.select, width: "100%", maxWidth: "none", margin: "0.5rem 0 1rem" }} value={selected} onChange={(e) => setSelected(e.target.value)}>
+        {props.sheets.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+      {props.error && <p style={s.error}>{props.error}</p>}
+      <button style={{ ...s.button, opacity: props.busy ? 0.5 : 1 }} disabled={props.busy || !selected} onClick={() => props.onChoose(selected)}>
+        {props.busy ? "Reading…" : "Use this sheet"}
+      </button>
     </div>
   );
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "imports" ADD COLUMN "sheet_name" text;

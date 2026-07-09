@@ -8,7 +8,7 @@ import {
   type PreviewView,
   type RowView,
 } from "./api";
-import { ErrorsStep, MappingStep, UploadStep } from "./steps";
+import { ErrorsStep, MappingStep, SheetPickerStep, UploadStep } from "./steps";
 import { buildStyles, type SchemapTheme } from "./styles";
 
 export type { MappingEntry, SchemaFieldLite, ImportView } from "./api";
@@ -32,9 +32,12 @@ export interface SchemapImporterProps {
   onError?: (error: Error) => void;
 }
 
+const XLSX_RE = /\.xlsx?$/i;
+
 type Step =
   | { name: "upload"; error: string | null }
   | { name: "busy"; label: string }
+  | { name: "sheet-picker"; uploadId: string; sheets: string[]; error: string | null; busy: boolean }
   | { name: "mapping"; importId: string; preview: PreviewView; mapping: MappingEntry[]; error: string | null; busy: boolean }
   | { name: "errors"; importId: string; imp: ImportView; headers: string[]; invalidRows: RowView[]; error: string | null; busy: boolean }
   | { name: "progress"; importId: string }
@@ -57,25 +60,48 @@ export function SchemapImporter(props: SchemapImporterProps): ReactElement {
     props.onError?.(err instanceof Error ? err : new Error(message));
   };
 
+  async function beginImport(uploadId: string, sheetName?: string): Promise<void> {
+    setStep({ name: "busy", label: "Reading your file…" });
+    const { import: created } = await api.createImport(uploadId, sheetName);
+    const imp = await api.waitWhile(created.id, ["created", "parsing", "mapping"]);
+    if (imp.status !== "awaiting_review") {
+      fail(new Error(imp.failureReason?.message ?? `Import could not be processed (${imp.status})`));
+      return;
+    }
+    const preview = await api.getPreview(created.id);
+    const mapping =
+      preview.proposedMapping ??
+      (preview.headers ?? []).map((h, i) => ({ source: h, sourceIndex: i, field: null, confidence: 0 }));
+    setStep({ name: "mapping", importId: created.id, preview, mapping, error: null, busy: false });
+  }
+
   async function handleFile(file: File): Promise<void> {
     try {
       setStep({ name: "busy", label: "Uploading your file…" });
       const { upload, uploadUrl } = await api.presignUpload(file.name, file.size, file.type || undefined);
       await api.putFile(uploadUrl, file);
-      setStep({ name: "busy", label: "Reading your file…" });
-      const { import: created } = await api.createImport(upload.id);
-      const imp = await api.waitWhile(created.id, ["created", "parsing", "mapping"]);
-      if (imp.status !== "awaiting_review") {
-        fail(new Error(imp.failureReason?.message ?? `Import could not be processed (${imp.status})`));
-        return;
+
+      if (XLSX_RE.test(file.name)) {
+        setStep({ name: "busy", label: "Looking at your workbook…" });
+        const { sheets } = await api.listSheets(upload.id);
+        if (sheets.length > 1) {
+          setStep({ name: "sheet-picker", uploadId: upload.id, sheets, error: null, busy: false });
+          return;
+        }
       }
-      const preview = await api.getPreview(created.id);
-      const mapping =
-        preview.proposedMapping ??
-        (preview.headers ?? []).map((h, i) => ({ source: h, sourceIndex: i, field: null, confidence: 0 }));
-      setStep({ name: "mapping", importId: created.id, preview, mapping, error: null, busy: false });
+      await beginImport(upload.id);
     } catch (err) {
       if (err instanceof SchemapApiError) setStep({ name: "upload", error: err.message });
+      else fail(err);
+    }
+  }
+
+  async function chooseSheet(current: Extract<Step, { name: "sheet-picker" }>, sheetName: string): Promise<void> {
+    try {
+      setStep({ ...current, busy: true, error: null });
+      await beginImport(current.uploadId, sheetName);
+    } catch (err) {
+      if (err instanceof SchemapApiError) setStep({ ...current, busy: false, error: err.message });
       else fail(err);
     }
   }
@@ -169,6 +195,15 @@ export function SchemapImporter(props: SchemapImporterProps): ReactElement {
       <div style={s.card}>
         {step.name === "upload" && <UploadStep s={s} error={step.error} onFile={(f) => void handleFile(f)} />}
         {step.name === "busy" && <p style={{ textAlign: "center", padding: "2rem 0" }}>{step.label}</p>}
+        {step.name === "sheet-picker" && (
+          <SheetPickerStep
+            s={s}
+            sheets={step.sheets}
+            error={step.error}
+            busy={step.busy}
+            onChoose={(sheetName) => void chooseSheet(step, sheetName)}
+          />
+        )}
         {step.name === "mapping" && (
           <MappingStep
             s={s}

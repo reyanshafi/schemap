@@ -6,6 +6,7 @@ export * from "./storage";
 export * from "./mapping";
 export * from "./validate";
 export * from "./webhooks";
+export * from "./spreadsheet";
 export * from "./queues";
 export * from "./db/client";
 export * as tables from "./db/schema";

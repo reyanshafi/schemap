@@ -4,10 +4,23 @@
   "private": true,
   "description": "Embeddable AI-powered data import wizard for React apps",
   "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.tsx"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
   },
   "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -16,6 +29,7 @@
   "devDependencies": {
     "@types/react": "^19.0.2",
     "react": "^19.0.0",
+    "tsup": "^8.3.5",
     "typescript": "^5.7.2"
   }
 }

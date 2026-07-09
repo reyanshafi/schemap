@@ -1,5 +1,5 @@
-import { LIMITS, newId, tables } from "@schemap/core";
-import { eq } from "drizzle-orm";
+import { isSpreadsheetFilename, LIMITS, listSheetNames, newId, tables } from "@schemap/core";
+import { and, eq } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -55,4 +55,26 @@ uploadsRouter.post("/", async (req, res) => {
     uploadUrl,
     expiresInSeconds: PRESIGN_TTL_SECONDS,
   });
+});
+
+// powers the widget's sheet picker — called after the presigned PUT completes (PRD §6.1)
+uploadsRouter.get("/:id/sheets", async (req, res) => {
+  const [upload] = await db
+    .select()
+    .from(tables.uploads)
+    .where(and(eq(tables.uploads.id, req.params.id), eq(tables.uploads.workspaceId, req.auth!.workspaceId)))
+    .limit(1);
+  if (!upload) throw new AppError(404, "not_found", "Upload not found");
+  if (!isSpreadsheetFilename(upload.filename)) {
+    throw new AppError(400, "not_a_spreadsheet", "Only .xlsx files have sheets to choose from");
+  }
+
+  let stream;
+  try {
+    stream = await storage.getObjectStream(upload.storageKey);
+  } catch {
+    throw new AppError(404, "file_missing", "The uploaded file was not found in storage");
+  }
+  const sheets = await listSheetNames(stream);
+  res.json({ sheets });
 });

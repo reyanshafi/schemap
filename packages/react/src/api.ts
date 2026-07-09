@@ -99,10 +99,15 @@ export class WidgetApi {
     if (!res.ok) throw new SchemapApiError(`File upload failed (${res.status})`);
   }
 
-  createImport(uploadId: string) {
+  /** XLSX only — powers the sheet picker before the import is created. */
+  listSheets(uploadId: string) {
+    return this.request<{ sheets: string[] }>(`/v1/uploads/${uploadId}/sheets`);
+  }
+
+  createImport(uploadId: string, sheetName?: string) {
     return this.request<{ import: { id: string } }>("/v1/imports", {
       method: "POST",
-      body: JSON.stringify({ uploadId }),
+      body: JSON.stringify({ uploadId, sheetName }),
     });
   }
 

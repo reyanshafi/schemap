@@ -1,6 +1,14 @@
 import { once } from "node:events";
+import type { Readable } from "node:stream";
 
-import { createStorage, LIMITS, tables, type ParseJob } from "@schemap/core";
+import {
+  createStorage,
+  isSpreadsheetFilename,
+  LIMITS,
+  readSpreadsheetRows,
+  tables,
+  type ParseJob,
+} from "@schemap/core";
 import type { Job } from "bullmq";
 import { parse } from "csv-parse";
 import { eq } from "drizzle-orm";
@@ -23,6 +31,36 @@ function sniffDelimiter(sample: string): string {
     }
   }
   return best;
+}
+
+/**
+ * CSV rows as an async generator, so the caller's header/batch loop is format-agnostic.
+ * The detected delimiter is reported via callback — a generator's return value isn't
+ * observable through a plain `for await...of` loop once it's fully consumed.
+ */
+async function* readCsvRows(
+  stream: Readable,
+  onDelimiter: (delimiter: string) => void,
+): AsyncGenerator<(string | null)[]> {
+  // pull the first chunk to sniff the delimiter, then feed it through the parser
+  const [firstChunk] = (await once(stream, "data")) as [Buffer];
+  stream.pause();
+  const delimiter = sniffDelimiter(firstChunk.toString("utf8"));
+  onDelimiter(delimiter);
+
+  const parser = parse({
+    delimiter,
+    bom: true,
+    relax_column_count: true,
+    relax_quotes: true,
+    skip_empty_lines: true,
+  });
+  parser.write(firstChunk);
+  stream.pipe(parser); // constant-memory: file → parser → 1k-row batches, never fully in RAM
+
+  for await (const record of parser as AsyncIterable<unknown[]>) {
+    yield record.map((v) => (v == null ? null : String(v)));
+  }
 }
 
 export async function processParse(job: Job<ParseJob>): Promise<void> {
@@ -67,20 +105,13 @@ export async function processParse(job: Job<ParseJob>): Promise<void> {
     return;
   }
 
-  // pull the first chunk to sniff the delimiter, then feed it through the parser
-  const [firstChunk] = (await once(stream, "data")) as [Buffer];
-  stream.pause();
-  const delimiter = sniffDelimiter(firstChunk.toString("utf8"));
-
-  const parser = parse({
-    delimiter,
-    bom: true,
-    relax_column_count: true,
-    relax_quotes: true,
-    skip_empty_lines: true,
-  });
-  parser.write(firstChunk);
-  stream.pipe(parser); // constant-memory: file → parser → 1k-row batches, never fully in RAM
+  const isSpreadsheet = isSpreadsheetFilename(upload.filename);
+  let detectedDelimiter: string | null = null;
+  const rows: AsyncGenerator<(string | null)[]> = isSpreadsheet
+    ? readSpreadsheetRows(stream, imp.sheetName ?? undefined)
+    : readCsvRows(stream, (d) => {
+        detectedDelimiter = d;
+      });
 
   let headers: string[] | null = null;
   const samples: string[][] = [];
@@ -99,34 +130,40 @@ export async function processParse(job: Job<ParseJob>): Promise<void> {
     batch = [];
   };
 
-  for await (const record of parser as AsyncIterable<unknown[]>) {
-    const values = record.map((v) => (v == null ? null : String(v)));
-
-    if (!headers) {
-      headers = values.map((v, i) => (v ?? "").trim() || `column_${i + 1}`);
-      for (let i = 0; i < headers.length; i++) samples.push([]);
-      continue;
-    }
-
-    rowNo += 1;
-    if (rowNo > LIMITS.maxRowsPerImport) {
-      stream.destroy();
-      await failImport(importId, imp.workspaceId, "parsing", {
-        code: "row_limit_exceeded",
-        message: `Files are limited to ${LIMITS.maxRowsPerImport.toLocaleString()} rows`,
-      });
-      return;
-    }
-
-    for (let i = 0; i < values.length && i < samples.length; i++) {
-      const v = values[i];
-      if (v && samples[i]!.length < LIMITS.samplesPerColumn) {
-        samples[i]!.push(v.slice(0, LIMITS.sampleMaxChars));
+  try {
+    for await (const values of rows) {
+      if (!headers) {
+        headers = values.map((v, i) => (v ?? "").trim() || `column_${i + 1}`);
+        for (let i = 0; i < headers.length; i++) samples.push([]);
+        continue;
       }
-    }
 
-    batch.push({ importId, rowNo, workspaceId: imp.workspaceId, raw: values });
-    if (batch.length >= LIMITS.stagingWriteBatchSize) await flush();
+      rowNo += 1;
+      if (rowNo > LIMITS.maxRowsPerImport) {
+        stream.destroy();
+        await failImport(importId, imp.workspaceId, "parsing", {
+          code: "row_limit_exceeded",
+          message: `Files are limited to ${LIMITS.maxRowsPerImport.toLocaleString()} rows`,
+        });
+        return;
+      }
+
+      for (let i = 0; i < values.length && i < samples.length; i++) {
+        const v = values[i];
+        if (v && samples[i]!.length < LIMITS.samplesPerColumn) {
+          samples[i]!.push(v.slice(0, LIMITS.sampleMaxChars));
+        }
+      }
+
+      batch.push({ importId, rowNo, workspaceId: imp.workspaceId, raw: values });
+      if (batch.length >= LIMITS.stagingWriteBatchSize) await flush();
+    }
+  } catch (err) {
+    await failImport(importId, imp.workspaceId, "parsing", {
+      code: isSpreadsheet ? "invalid_spreadsheet" : "invalid_csv",
+      message: err instanceof Error ? err.message : "Failed to parse the file",
+    });
+    return;
   }
   await flush();
 
@@ -141,8 +178,8 @@ export async function processParse(job: Job<ParseJob>): Promise<void> {
   await db
     .update(tables.imports)
     .set({
-      delimiter,
-      encoding: "utf-8",
+      delimiter: detectedDelimiter,
+      encoding: isSpreadsheet ? null : "utf-8",
       headers,
       columnSamples: samples,
       rowCount: rowNo,
@@ -151,5 +188,5 @@ export async function processParse(job: Job<ParseJob>): Promise<void> {
     })
     .where(eq(tables.imports.id, importId));
   await transition(importId, imp.workspaceId, "parsing", "mapping", { rows: rowNo });
-  await enqueueMap(importId); // Phase 4 implements the map processor
+  await enqueueMap(importId);
 }

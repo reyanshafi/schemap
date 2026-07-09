@@ -15,6 +15,13 @@
       "when": 1783597326506,
       "tag": "0001_chemical_ares",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783598205964,
+      "tag": "0002_serious_darkstar",
+      "breakpoints": true
     }
   ]
 }

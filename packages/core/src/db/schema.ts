@@ -244,8 +244,9 @@ export const imports = pgTable(
     duplicatePolicy: text("duplicate_policy", { enum: DUPLICATE_POLICIES }).notNull(),
 
     // parse metadata
-    delimiter: text("delimiter"),
+    delimiter: text("delimiter"), // CSV only
     encoding: text("encoding"),
+    sheetName: text("sheet_name"), // XLSX only; null = first sheet
     headers: jsonb("headers").$type<string[]>(),
     columnSamples: jsonb("column_samples").$type<string[][]>(), // ≤5 per column, 80-char capped
 

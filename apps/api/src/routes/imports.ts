@@ -36,6 +36,8 @@ const createImportBody = z.object({
   // per-embed policy overrides (PRD §6.2)
   validationPolicy: z.enum(VALIDATION_POLICIES).optional(),
   duplicatePolicy: z.enum(DUPLICATE_POLICIES).optional(),
+  // XLSX sheet picker (PRD §6.1) — omit to use the first sheet
+  sheetName: z.string().min(1).max(255).optional(),
 });
 
 export const importsRouter = Router();
@@ -91,6 +93,7 @@ importsRouter.post("/", async (req, res) => {
       endUserOrg: body.endUserOrg ?? auth.endUserOrg,
       validationPolicy: body.validationPolicy ?? schema.validationPolicy,
       duplicatePolicy: body.duplicatePolicy ?? schema.duplicatePolicy,
+      sheetName: body.sheetName,
     });
     await tx
       .update(tables.uploads)
