@@ -11,10 +11,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "concurrently -n api,worker,dash -c blue,yellow,magenta \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:dashboard\"",
+    "dev": "concurrently -n api,worker,dash,site -c blue,yellow,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:dashboard\" \"npm:dev:website\"",
     "dev:api": "npm run dev -w @schemap/api",
     "dev:worker": "npm run dev -w @schemap/worker",
     "dev:dashboard": "npm run dev -w @schemap/dashboard",
+    "dev:website": "npm run dev -w @schemap/website",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:generate": "npm run db:generate -w @schemap/core",
     "db:migrate": "npm run db:migrate -w @schemap/core"
