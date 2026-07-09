@@ -105,12 +105,17 @@ export async function requireApiKey(req: Request, _res: Response, next: NextFunc
   next();
 }
 
-/** Import-pipeline endpoints: embed JWT (the widget), API key, or dashboard session. */
+/**
+ * Import-pipeline endpoints: embed JWT (the widget), API key, or dashboard session.
+ * Also accepts ?token=<embed JWT> — EventSource (SSE) cannot set request headers.
+ */
 export async function requireImportAuth(req: Request, _res: Response, next: NextFunction) {
   const header = req.headers.authorization;
+  const queryToken = typeof req.query.token === "string" ? req.query.token : null;
   let auth: Auth | null;
   if (header?.startsWith("Bearer sk_")) auth = await resolveApiKey(req);
   else if (header?.startsWith("Bearer ")) auth = await resolveEmbed(header.slice("Bearer ".length));
+  else if (queryToken) auth = await resolveEmbed(queryToken);
   else auth = await resolveSession(req);
   if (!auth) {
     throw new AppError(401, "unauthenticated", "Provide an embed token, API key, or sign in");

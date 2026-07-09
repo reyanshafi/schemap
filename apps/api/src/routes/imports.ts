@@ -580,7 +580,7 @@ importsRouter.get("/:id/rows", async (req, res) => {
   });
 });
 
-// headers + samples + suggested mapping + first 100 raw rows (docs/02 §8)
+// headers + samples + suggested mapping + schema fields + first 100 raw rows
 importsRouter.get("/:id/preview", async (req, res) => {
   const imp = await loadImport(req.auth!.workspaceId, req.params.id);
 
@@ -591,6 +591,13 @@ importsRouter.get("/:id/preview", async (req, res) => {
     .orderBy(asc(tables.importRows.rowNo))
     .limit(LIMITS.previewRows);
 
+  // the widget needs the target fields to render the remap dropdowns
+  const [schema] = await db
+    .select({ fields: tables.schemas.fields })
+    .from(tables.schemas)
+    .where(eq(tables.schemas.id, imp.schemaId))
+    .limit(1);
+
   res.json({
     importId: imp.id,
     status: imp.status,
@@ -599,6 +606,7 @@ importsRouter.get("/:id/preview", async (req, res) => {
     columnSamples: imp.columnSamples,
     proposedMapping: imp.proposedMapping,
     mappingSource: imp.mappingSource,
+    schemaFields: schema?.fields ?? [],
     rowCount: imp.rowCount,
     rows,
   });

@@ -7,7 +7,7 @@ import { db } from "../db";
 import { AppError } from "../errors";
 import { EMBED_TOKEN_TTL_SECONDS, mintEmbedToken } from "../lib/embed-tokens";
 import { parseBody } from "../lib/http";
-import { requireApiKey } from "../middleware/auth";
+import { requireWorkspaceAuth } from "../middleware/auth";
 
 const mintBody = z
   .object({
@@ -18,7 +18,8 @@ const mintBody = z
   .refine((b) => b.schemaId || b.schemaKey, { message: "schemaId or schemaKey is required" });
 
 export const embedTokensRouter = Router();
-embedTokensRouter.use(requireApiKey); // host backend only — the browser never sees an API key
+// host backends mint with their API key; the dashboard's importer playground mints with a session
+embedTokensRouter.use(requireWorkspaceAuth);
 
 embedTokensRouter.post("/", async (req, res) => {
   const body = parseBody(mintBody, req.body);

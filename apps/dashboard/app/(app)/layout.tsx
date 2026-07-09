@@ -40,6 +40,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <nav style={{ display: "flex", gap: "1rem" }}>
           <Link href="/schemas">Schemas</Link>
           <Link href="/api-keys">API keys</Link>
+          <Link href="/test-importer">Test importer</Link>
         </nav>
         <span style={{ marginLeft: "auto", color: "#666", fontSize: "0.9rem" }}>
           {me.workspace.name} · {me.user.email}
