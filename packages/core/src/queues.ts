@@ -39,10 +39,27 @@ export const WORKER_CONCURRENCY: Record<QueueName, number> = {
 };
 
 // Deterministic job ids: accidental double-enqueues collapse into one job.
+// "-" separator — BullMQ reserves ":" in custom job ids.
 export const jobId = {
-  parse: (importId: string) => `parse:${importId}`,
-  map: (importId: string) => `map:${importId}`,
-  validate: (importId: string) => `validate:${importId}`,
-  deliver: (importId: string, batchNo: number) => `deliver:${importId}:${batchNo}`,
-  rollback: (importId: string) => `rollback:${importId}`,
+  parse: (importId: string) => `parse-${importId}`,
+  map: (importId: string) => `map-${importId}`,
+  validate: (importId: string) => `validate-${importId}`,
+  deliver: (importId: string, batchNo: number) => `deliver-${importId}-${batchNo}`,
+  rollback: (importId: string) => `rollback-${importId}`,
 } as const;
+
+/** BullMQ connection options from a redis:// URL (both API producer and worker consumer use this). */
+export function bullConnectionFromUrl(redisUrl: string): {
+  host: string;
+  port: number;
+  password?: string;
+  maxRetriesPerRequest: null;
+} {
+  const url = new URL(redisUrl);
+  return {
+    host: url.hostname,
+    port: Number(url.port || 6379),
+    ...(url.password ? { password: url.password } : {}),
+    maxRetriesPerRequest: null, // BullMQ requirement
+  };
+}

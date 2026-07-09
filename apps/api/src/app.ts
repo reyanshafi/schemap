@@ -6,7 +6,10 @@ import { env } from "./env";
 import { errorHandler, notFoundHandler } from "./errors";
 import { apiKeysRouter } from "./routes/api-keys";
 import { authRouter } from "./routes/auth";
+import { embedTokensRouter } from "./routes/embed-tokens";
+import { importsRouter } from "./routes/imports";
 import { schemasRouter } from "./routes/schemas";
+import { uploadsRouter } from "./routes/uploads";
 
 const startedAt = Date.now();
 
@@ -31,7 +34,10 @@ export function createApp(): Express {
 
   // public API (API key; schemas also accept a dashboard session — docs/02 §8)
   app.use("/v1/schemas", schemasRouter);
-  // Phase 3+: embed-tokens, uploads, imports, webhook-deliveries
+  app.use("/v1/embed-tokens", embedTokensRouter);
+  app.use("/v1/uploads", uploadsRouter);
+  app.use("/v1/imports", importsRouter);
+  // Phase 4+: mapping confirm, row fixes, confirm, SSE events, webhook-deliveries
 
   app.use(notFoundHandler);
   app.use(errorHandler);
