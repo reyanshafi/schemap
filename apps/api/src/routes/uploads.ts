@@ -7,6 +7,7 @@ import { db } from "../db";
 import { AppError } from "../errors";
 import { parseBody } from "../lib/http";
 import { requireImportAuth } from "../middleware/auth";
+import { rateLimit } from "../middleware/rate-limit";
 import { storage } from "../storage";
 
 const createUploadBody = z.object({
@@ -23,6 +24,7 @@ const PRESIGN_TTL_SECONDS = 600;
 
 export const uploadsRouter = Router();
 uploadsRouter.use(requireImportAuth);
+uploadsRouter.use(rateLimit);
 
 uploadsRouter.post("/", async (req, res) => {
   const body = parseBody(createUploadBody, req.body);

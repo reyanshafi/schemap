@@ -8,6 +8,7 @@ import { AppError } from "../errors";
 import { EMBED_TOKEN_TTL_SECONDS, mintEmbedToken } from "../lib/embed-tokens";
 import { parseBody } from "../lib/http";
 import { requireWorkspaceAuth } from "../middleware/auth";
+import { rateLimit } from "../middleware/rate-limit";
 
 const mintBody = z
   .object({
@@ -20,6 +21,7 @@ const mintBody = z
 export const embedTokensRouter = Router();
 // host backends mint with their API key; the dashboard's importer playground mints with a session
 embedTokensRouter.use(requireWorkspaceAuth);
+embedTokensRouter.use(rateLimit);
 
 embedTokensRouter.post("/", async (req, res) => {
   const body = parseBody(mintBody, req.body);

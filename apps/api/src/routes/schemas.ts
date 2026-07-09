@@ -13,6 +13,7 @@ import { db } from "../db";
 import { AppError } from "../errors";
 import { isUniqueViolation, parseBody } from "../lib/http";
 import { requireWorkspaceAuth } from "../middleware/auth";
+import { rateLimit } from "../middleware/rate-limit";
 
 const createSchemaBody = z.object({
   key: z
@@ -31,6 +32,7 @@ const updateSchemaBody = createSchemaBody.omit({ key: true }).partial();
 
 export const schemasRouter = Router();
 schemasRouter.use(requireWorkspaceAuth);
+schemasRouter.use(rateLimit);
 
 function whereActive(workspaceId: string, id?: string) {
   const conditions = [

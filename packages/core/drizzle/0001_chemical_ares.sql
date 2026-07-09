@@ -1,0 +1,1 @@
+ALTER TABLE "uploads" ADD COLUMN "storage_deleted_at" timestamp with time zone;

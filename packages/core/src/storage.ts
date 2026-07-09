@@ -1,6 +1,6 @@
 import type { Readable } from "node:stream";
 
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // One storage abstraction for MinIO (dev) and Cloudflare R2 (prod) — both speak S3.
@@ -33,6 +33,8 @@ export interface Storage {
   putObject(key: string, body: string | Buffer, contentType?: string): Promise<void>;
   /** Presigned GET URL (error-report downloads). */
   presignDownload(key: string, expiresInSeconds?: number): Promise<string>;
+  /** Idempotent — deleting an already-deleted or missing key succeeds (docs/03 §7 cleanup job). */
+  deleteObject(key: string): Promise<void>;
 }
 
 export function createStorage(cfg: StorageConfig = storageConfigFromEnv()): Storage {
@@ -64,6 +66,9 @@ export function createStorage(cfg: StorageConfig = storageConfigFromEnv()): Stor
       return getSignedUrl(client, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), {
         expiresIn: expiresInSeconds,
       });
+    },
+    async deleteObject(key) {
+      await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }));
     },
   };
 }

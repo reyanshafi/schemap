@@ -212,6 +212,9 @@ export const uploads = pgTable(
     // between uploads and imports would complicate migrations for nothing
     consumedByImportId: text("consumed_by_import_id"),
     deleteAfter: timestamp("delete_after", { withTimezone: true }).notNull(),
+    // set once the cleanup job removes the object from storage — makes the sweep idempotent
+    // instead of re-issuing a delete for the same key on every run forever
+    storageDeletedAt: timestamp("storage_deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [index("uploads_delete_after_idx").on(t.deleteAfter)],

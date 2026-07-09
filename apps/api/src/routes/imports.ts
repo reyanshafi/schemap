@@ -25,6 +25,7 @@ import {
   enqueueValidate,
 } from "../lib/queues";
 import { requireImportAuth } from "../middleware/auth";
+import { rateLimit } from "../middleware/rate-limit";
 import { storage } from "../storage";
 
 const createImportBody = z.object({
@@ -39,6 +40,7 @@ const createImportBody = z.object({
 
 export const importsRouter = Router();
 importsRouter.use(requireImportAuth);
+importsRouter.use(rateLimit);
 
 const actorFor = (via: string) =>
   via === "embed" ? "end_user" : via === "api_key" ? "developer_api" : "dashboard";
