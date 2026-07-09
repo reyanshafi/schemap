@@ -1,6 +1,7 @@
 {
   "name": "@schemap/react",
   "version": "0.0.1",
+  "private": true,
   "description": "Embeddable AI-powered data import wizard for React apps",
   "type": "module",
   "exports": {
