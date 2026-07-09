@@ -3,6 +3,7 @@ import "./env"; // load .env before anything reads process.env
 import { QUEUE, WORKER_CONCURRENCY, type QueueName } from "@schemap/core";
 import { Worker, type Job } from "bullmq";
 
+import { processMap } from "./processors/map";
 import { processParse } from "./processors/parse";
 import { closeProducers, connection } from "./queues";
 
@@ -13,6 +14,7 @@ async function notImplemented(job: Job): Promise<void> {
 
 const processors: Partial<Record<QueueName, (job: Job) => Promise<void>>> = {
   [QUEUE.parse]: processParse,
+  [QUEUE.map]: processMap,
 };
 
 const workers = (Object.values(QUEUE) as QueueName[]).map(

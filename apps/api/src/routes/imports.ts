@@ -1,6 +1,8 @@
 import {
   DUPLICATE_POLICIES,
+  headerSignature,
   LIMITS,
+  mappingSchema,
   newId,
   tables,
   VALIDATION_POLICIES,
@@ -12,7 +14,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { AppError } from "../errors";
 import { parseBody } from "../lib/http";
-import { enqueueParse } from "../lib/queues";
+import { enqueueParse, enqueueValidate } from "../lib/queues";
 import { requireImportAuth } from "../middleware/auth";
 
 const createImportBody = z.object({
@@ -128,6 +130,78 @@ importsRouter.get("/:id", async (req, res) => {
     Object.keys(importColumns).map((k) => [k, imp[k as keyof typeof imp]]),
   );
   res.json({ import: publicView });
+});
+
+// human confirms/overrides the proposed mapping (docs/02 §4.5) → validating
+const confirmMappingBody = z.object({ mapping: mappingSchema.min(1) });
+
+importsRouter.post("/:id/mapping", async (req, res) => {
+  const body = parseBody(confirmMappingBody, req.body);
+  const imp = await loadImport(req.auth!.workspaceId, req.params.id);
+  if (imp.status !== "awaiting_review") {
+    throw new AppError(409, "invalid_state", `Import is "${imp.status}", expected "awaiting_review"`);
+  }
+  if (!imp.headers?.length) throw new AppError(409, "invalid_state", "Import has no headers");
+
+  const [schema] = await db
+    .select()
+    .from(tables.schemas)
+    .where(eq(tables.schemas.id, imp.schemaId))
+    .limit(1);
+  if (!schema) throw new AppError(404, "not_found", "Schema not found");
+
+  const fieldKeys = new Set(schema.fields.map((f) => f.key));
+  const seenFields = new Set<string>();
+  for (const entry of body.mapping) {
+    if (entry.sourceIndex >= imp.headers.length) {
+      throw new AppError(400, "invalid_mapping", `sourceIndex ${entry.sourceIndex} is out of range`);
+    }
+    if (entry.field === null) continue;
+    if (!fieldKeys.has(entry.field)) {
+      throw new AppError(400, "invalid_mapping", `Unknown schema field "${entry.field}"`);
+    }
+    if (seenFields.has(entry.field)) {
+      throw new AppError(400, "invalid_mapping", `Field "${entry.field}" is mapped by two columns`);
+    }
+    seenFields.add(entry.field);
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(tables.imports)
+      .set({ confirmedMapping: body.mapping, status: "validating", updatedAt: new Date() })
+      .where(eq(tables.imports.id, imp.id));
+    await tx.insert(tables.importEvents).values({
+      importId: imp.id,
+      workspaceId: imp.workspaceId,
+      fromStatus: "awaiting_review",
+      toStatus: "validating",
+      actor: actorFor(req.auth!.via),
+    });
+    // confirmed human choices teach the cache — the system learns per workspace (docs/03 §4.5)
+    await tx
+      .insert(tables.mappingCache)
+      .values({
+        id: newId("mappingCache"),
+        workspaceId: imp.workspaceId,
+        schemaId: schema.id,
+        schemaVersion: schema.version,
+        headerSignature: headerSignature(imp.headers!),
+        mapping: body.mapping,
+        source: "human",
+      })
+      .onConflictDoUpdate({
+        target: [
+          tables.mappingCache.schemaId,
+          tables.mappingCache.schemaVersion,
+          tables.mappingCache.headerSignature,
+        ],
+        set: { mapping: body.mapping, source: "human", updatedAt: new Date() },
+      });
+  });
+
+  await enqueueValidate(imp.id); // Phase 5 implements the validate processor
+  res.json({ import: { id: imp.id, status: "validating" } });
 });
 
 // headers + samples + suggested mapping + first 100 raw rows (docs/02 §8)
