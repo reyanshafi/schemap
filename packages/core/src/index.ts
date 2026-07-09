@@ -4,6 +4,7 @@ export * from "./ids";
 export * from "./crypto";
 export * from "./storage";
 export * from "./mapping";
+export * from "./validate";
 export * from "./queues";
 export * from "./db/client";
 export * as tables from "./db/schema";

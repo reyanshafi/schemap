@@ -5,6 +5,7 @@ import { Worker, type Job } from "bullmq";
 
 import { processMap } from "./processors/map";
 import { processParse } from "./processors/parse";
+import { processValidate } from "./processors/validate";
 import { closeProducers, connection } from "./queues";
 
 // Phase 4+ fills in map, validate, deliver, rollback, cleanup.
@@ -15,6 +16,7 @@ async function notImplemented(job: Job): Promise<void> {
 const processors: Partial<Record<QueueName, (job: Job) => Promise<void>>> = {
   [QUEUE.parse]: processParse,
   [QUEUE.map]: processMap,
+  [QUEUE.validate]: processValidate,
 };
 
 const workers = (Object.values(QUEUE) as QueueName[]).map(
