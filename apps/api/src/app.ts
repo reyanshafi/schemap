@@ -10,6 +10,7 @@ import { embedTokensRouter } from "./routes/embed-tokens";
 import { importsRouter } from "./routes/imports";
 import { schemasRouter } from "./routes/schemas";
 import { uploadsRouter } from "./routes/uploads";
+import { webhookDeliveriesRouter } from "./routes/webhook-deliveries";
 import { webhookEndpointsRouter } from "./routes/webhook-endpoints";
 
 const startedAt = Date.now();
@@ -39,6 +40,7 @@ export function createApp(): Express {
   app.use("/v1/uploads", uploadsRouter);
   app.use("/v1/imports", importsRouter);
   app.use("/v1/webhook-endpoints", webhookEndpointsRouter);
+  app.use("/v1/webhook-deliveries", webhookDeliveriesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

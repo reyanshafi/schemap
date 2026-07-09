@@ -49,4 +49,5 @@ export const ui = {
   } as CSSProperties,
   td: { padding: "0.5rem", borderBottom: "1px solid #f0f0f0" } as CSSProperties,
   mono: { fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" } as CSSProperties,
+  muted: { color: "#888", fontSize: "0.85rem" } as CSSProperties,
 };

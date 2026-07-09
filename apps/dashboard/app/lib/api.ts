@@ -72,3 +72,87 @@ export interface ApiKey {
   createdAt: string;
   revokedAt: string | null;
 }
+
+export interface ImportListItem {
+  id: string;
+  status: string;
+  schemaKey: string;
+  schemaName: string;
+  rowCount: number;
+  validCount: number;
+  invalidCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  endUserOrg: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface ImportDetail {
+  id: string;
+  schemaId: string;
+  schemaVersion: number;
+  status: string;
+  failureReason: { code: string; message: string } | null;
+  rowCount: number;
+  validCount: number;
+  invalidCount: number;
+  excludedCount: number;
+  deliveredCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  errorSummary: { code: string; field: string | null; count: number }[] | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface ActivityEvent {
+  id: number;
+  fromStatus: string | null;
+  toStatus: string;
+  actor: string;
+  detail: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  mode: "test" | "live";
+  active: boolean;
+  createdAt: string;
+}
+
+export interface Delivery {
+  id: string;
+  importId: string;
+  type: string;
+  batchNo: number | null;
+  idempotencyKey: string;
+  status: string;
+  attemptCount: number;
+  endpointUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeliveryAttempt {
+  attemptNo: number;
+  responseStatus: number | null;
+  responseBody: string | null;
+  error: string | null;
+  durationMs: number | null;
+  createdAt: string;
+}
+
+export const STATUS_COLORS: Record<string, string> = {
+  completed: "#16a34a",
+  importing: "#2563eb",
+  awaiting_review: "#d97706",
+  awaiting_confirm: "#d97706",
+  failed: "#dc2626",
+  rolled_back: "#dc2626",
+  rolling_back: "#dc2626",
+  cancelled: "#6b7280",
+};

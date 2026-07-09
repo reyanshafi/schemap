@@ -9,7 +9,7 @@ import {
   VALIDATION_POLICIES,
   validateRow,
 } from "@schemap/core";
-import { and, asc, count, eq, gt, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -105,6 +105,32 @@ importsRouter.post("/", async (req, res) => {
 
   await enqueueParse(id);
   res.status(201).json({ import: { id, status: "created", schemaId: schema.id } });
+});
+
+// recent imports for the workspace (dashboard history)
+importsRouter.get("/", async (req, res) => {
+  const limit = Math.min(Number(req.query.limit ?? 50), 100);
+  const imports = await db
+    .select({
+      id: tables.imports.id,
+      status: tables.imports.status,
+      schemaKey: tables.schemas.key,
+      schemaName: tables.schemas.name,
+      rowCount: tables.imports.rowCount,
+      validCount: tables.imports.validCount,
+      invalidCount: tables.imports.invalidCount,
+      acceptedCount: tables.imports.acceptedCount,
+      rejectedCount: tables.imports.rejectedCount,
+      endUserOrg: tables.imports.endUserOrg,
+      createdAt: tables.imports.createdAt,
+      completedAt: tables.imports.completedAt,
+    })
+    .from(tables.imports)
+    .innerJoin(tables.schemas, eq(tables.schemas.id, tables.imports.schemaId))
+    .where(eq(tables.imports.workspaceId, req.auth!.workspaceId))
+    .orderBy(desc(tables.imports.createdAt))
+    .limit(limit);
+  res.json({ imports });
 });
 
 const importColumns = {
@@ -543,6 +569,24 @@ importsRouter.get("/:id/events", async (req, res) => {
     });
   }, 1000);
   req.on("close", () => clearInterval(timer));
+});
+
+// full audit timeline for one import (dashboard drill-down)
+importsRouter.get("/:id/activity", async (req, res) => {
+  const imp = await loadImport(req.auth!.workspaceId, req.params.id);
+  const events = await db
+    .select({
+      id: tables.importEvents.id,
+      fromStatus: tables.importEvents.fromStatus,
+      toStatus: tables.importEvents.toStatus,
+      actor: tables.importEvents.actor,
+      detail: tables.importEvents.detail,
+      createdAt: tables.importEvents.createdAt,
+    })
+    .from(tables.importEvents)
+    .where(eq(tables.importEvents.importId, imp.id))
+    .orderBy(asc(tables.importEvents.id));
+  res.json({ events });
 });
 
 // pull-mode row fetch with keyset cursor (docs/02 §8)

@@ -62,6 +62,21 @@ export async function enqueueDeliverBatches(importId: string, batchCount: number
   );
 }
 
+/** unique jobId per redrive — the original deterministic job may still exist */
+export async function enqueueDeliverRedrive(importId: string, batchNo: number): Promise<void> {
+  await deliverQueue.add(
+    "deliver",
+    { importId, batchNo },
+    {
+      jobId: `${jobId.deliver(importId, batchNo)}-r${Date.now()}`,
+      attempts: 5,
+      backoff: { type: "exponential", delay: 30_000 },
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
+    },
+  );
+}
+
 export async function enqueueRollback(importId: string): Promise<void> {
   await rollbackQueue.add(
     "rollback",

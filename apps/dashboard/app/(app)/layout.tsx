@@ -39,6 +39,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <strong>Schemap</strong>
         <nav style={{ display: "flex", gap: "1rem" }}>
           <Link href="/schemas">Schemas</Link>
+          <Link href="/imports">Imports</Link>
+          <Link href="/webhooks">Webhooks</Link>
           <Link href="/api-keys">API keys</Link>
           <Link href="/test-importer">Test importer</Link>
         </nav>
