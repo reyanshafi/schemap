@@ -3,8 +3,10 @@ import "./env"; // load .env before anything reads process.env
 import { QUEUE, WORKER_CONCURRENCY, type QueueName } from "@schemap/core";
 import { Worker, type Job } from "bullmq";
 
+import { processDeliver } from "./processors/deliver";
 import { processMap } from "./processors/map";
 import { processParse } from "./processors/parse";
+import { processRollback } from "./processors/rollback";
 import { processValidate } from "./processors/validate";
 import { closeProducers, connection } from "./queues";
 
@@ -17,6 +19,8 @@ const processors: Partial<Record<QueueName, (job: Job) => Promise<void>>> = {
   [QUEUE.parse]: processParse,
   [QUEUE.map]: processMap,
   [QUEUE.validate]: processValidate,
+  [QUEUE.deliver]: processDeliver,
+  [QUEUE.rollback]: processRollback,
 };
 
 const workers = (Object.values(QUEUE) as QueueName[]).map(

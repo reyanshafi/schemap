@@ -10,6 +10,7 @@ import { embedTokensRouter } from "./routes/embed-tokens";
 import { importsRouter } from "./routes/imports";
 import { schemasRouter } from "./routes/schemas";
 import { uploadsRouter } from "./routes/uploads";
+import { webhookEndpointsRouter } from "./routes/webhook-endpoints";
 
 const startedAt = Date.now();
 
@@ -37,7 +38,7 @@ export function createApp(): Express {
   app.use("/v1/embed-tokens", embedTokensRouter);
   app.use("/v1/uploads", uploadsRouter);
   app.use("/v1/imports", importsRouter);
-  // Phase 4+: mapping confirm, row fixes, confirm, SSE events, webhook-deliveries
+  app.use("/v1/webhook-endpoints", webhookEndpointsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

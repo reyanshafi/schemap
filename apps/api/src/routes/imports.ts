@@ -9,15 +9,23 @@ import {
   VALIDATION_POLICIES,
   validateRow,
 } from "@schemap/core";
-import { and, asc, count, eq, gt, isNull, ne } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull, ne } from "drizzle-orm";
 import { Router } from "express";
 import { z } from "zod";
+
+import { sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { AppError } from "../errors";
 import { parseBody } from "../lib/http";
-import { enqueueParse, enqueueValidate } from "../lib/queues";
+import {
+  enqueueDeliverBatches,
+  enqueueParse,
+  enqueueRollback,
+  enqueueValidate,
+} from "../lib/queues";
 import { requireImportAuth } from "../middleware/auth";
+import { storage } from "../storage";
 
 const createImportBody = z.object({
   uploadId: z.string().min(1),
@@ -110,6 +118,8 @@ const importColumns = {
   invalidCount: tables.imports.invalidCount,
   excludedCount: tables.imports.excludedCount,
   deliveredCount: tables.imports.deliveredCount,
+  acceptedCount: tables.imports.acceptedCount,
+  rejectedCount: tables.imports.rejectedCount,
   errorSummary: tables.imports.errorSummary,
   createdAt: tables.imports.createdAt,
   updatedAt: tables.imports.updatedAt,
@@ -307,7 +317,7 @@ importsRouter.patch("/:id/rows/:rowNo", async (req, res) => {
   res.json({ row: { rowNo, status, errors: errors.length ? errors : null, data: result.data } });
 });
 
-// end user confirms the import after fixing/reviewing errors (docs/02 §4.7) → importing
+// end user confirms after fixing/reviewing errors → importing (delivery) or completed (pull mode)
 importsRouter.post("/:id/confirm", async (req, res) => {
   const imp = await loadImport(req.auth!.workspaceId, req.params.id);
   if (imp.status !== "awaiting_confirm") {
@@ -321,6 +331,62 @@ importsRouter.post("/:id/confirm", async (req, res) => {
     );
   }
 
+  // pack valid rows into ordered batches of 500 — one SQL pass, no row shuffling in Node
+  await db.execute(sql`
+    update import_rows set batch_no = sub.b
+    from (
+      select row_no, (((row_number() over (order by row_no)) - 1) / ${LIMITS.deliveryBatchSize}::int)::int + 1 as b
+      from import_rows where import_id = ${imp.id} and status = 'valid'
+    ) sub
+    where import_rows.import_id = ${imp.id} and import_rows.row_no = sub.row_no
+  `);
+  const [batchRow] = await db
+    .select({ max: sql<number | null>`max(${tables.importRows.batchNo})` })
+    .from(tables.importRows)
+    .where(eq(tables.importRows.importId, imp.id));
+  const batchCount = batchRow?.max ?? 0;
+
+  const [endpoint] = await db
+    .select({ id: tables.webhookEndpoints.id })
+    .from(tables.webhookEndpoints)
+    .where(
+      and(
+        eq(tables.webhookEndpoints.workspaceId, imp.workspaceId),
+        eq(tables.webhookEndpoints.active, true),
+      ),
+    )
+    .orderBy(asc(tables.webhookEndpoints.createdAt))
+    .limit(1);
+
+  // no webhook endpoint (or nothing to send): pull mode — host fetches rows via GET /rows
+  if (!endpoint || batchCount === 0) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(tables.imports)
+        .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
+        .where(eq(tables.imports.id, imp.id));
+      await tx.insert(tables.importEvents).values([
+        {
+          importId: imp.id,
+          workspaceId: imp.workspaceId,
+          fromStatus: "awaiting_confirm",
+          toStatus: "importing",
+          actor: actorFor(req.auth!.via),
+        },
+        {
+          importId: imp.id,
+          workspaceId: imp.workspaceId,
+          fromStatus: "importing",
+          toStatus: "completed",
+          actor: "system",
+          detail: { deliveryMode: "pull", batches: batchCount },
+        },
+      ]);
+    });
+    res.json({ import: { id: imp.id, status: "completed", deliveryMode: "pull" } });
+    return;
+  }
+
   await db.transaction(async (tx) => {
     await tx
       .update(tables.imports)
@@ -332,10 +398,151 @@ importsRouter.post("/:id/confirm", async (req, res) => {
       fromStatus: "awaiting_confirm",
       toStatus: "importing",
       actor: actorFor(req.auth!.via),
+      detail: { batches: batchCount },
+    });
+    await tx.insert(tables.webhookDeliveries).values(
+      Array.from({ length: batchCount }, (_, i) => ({
+        id: newId("webhookDelivery"),
+        workspaceId: imp.workspaceId,
+        importId: imp.id,
+        endpointId: endpoint.id,
+        type: "rows.batch" as const,
+        batchNo: i + 1,
+        idempotencyKey: `${imp.id}:${i + 1}`,
+      })),
+    );
+  });
+  await enqueueDeliverBatches(imp.id, batchCount);
+  res.json({ import: { id: imp.id, status: "importing", batches: batchCount } });
+});
+
+// cancel a non-terminal import; rolls back if batches were already delivered (docs/02 §4.9)
+importsRouter.post("/:id/cancel", async (req, res) => {
+  const imp = await loadImport(req.auth!.workspaceId, req.params.id);
+  const terminal = ["completed", "failed", "rolled_back", "cancelled"];
+  if (terminal.includes(imp.status)) {
+    throw new AppError(409, "invalid_state", `Import is already "${imp.status}"`);
+  }
+
+  const [delivered] = await db
+    .select({ n: count() })
+    .from(tables.webhookDeliveries)
+    .where(
+      and(
+        eq(tables.webhookDeliveries.importId, imp.id),
+        eq(tables.webhookDeliveries.type, "rows.batch"),
+        eq(tables.webhookDeliveries.status, "succeeded"),
+      ),
+    );
+  const needsRollback = (delivered?.n ?? 0) > 0;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(tables.imports)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(eq(tables.imports.id, imp.id));
+    await tx.insert(tables.importEvents).values({
+      importId: imp.id,
+      workspaceId: imp.workspaceId,
+      fromStatus: imp.status,
+      toStatus: "cancelled",
+      actor: actorFor(req.auth!.via),
+      detail: { rollback: needsRollback },
     });
   });
-  // Phase 6: pack valid rows into batches of 500 and enqueue webhook delivery
-  res.json({ import: { id: imp.id, status: "importing" } });
+  if (needsRollback) await enqueueRollback(imp.id);
+  res.json({ import: { id: imp.id, status: "cancelled", rollback: needsRollback } });
+});
+
+// downloadable error CSV: original rows + error_reason column (docs/02 §6.9), generated on demand
+importsRouter.get("/:id/error-report", async (req, res) => {
+  const imp = await loadImport(req.auth!.workspaceId, req.params.id);
+
+  let key = imp.errorReportKey;
+  if (!key) {
+    const errorRows = await db
+      .select({
+        rowNo: tables.importRows.rowNo,
+        raw: tables.importRows.raw,
+        errors: tables.importRows.errors,
+      })
+      .from(tables.importRows)
+      .where(and(eq(tables.importRows.importId, imp.id), inArray(tables.importRows.status, ["invalid", "excluded", "rejected"])))
+      .orderBy(asc(tables.importRows.rowNo));
+    if (errorRows.length === 0) throw new AppError(404, "no_errors", "This import has no error rows");
+
+    const csvCell = (v: string | null): string => {
+      let s = v ?? "";
+      if (/^[=+\-@]/.test(s)) s = `'${s}`; // CSV-injection guard
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [
+      [...(imp.headers ?? []), "error_reason"].map(csvCell).join(","),
+      ...errorRows.map((r) =>
+        [...r.raw, (r.errors ?? []).map((e) => e.message).join("; ")].map(csvCell).join(","),
+      ),
+    ];
+    key = `reports/${imp.workspaceId}/${imp.id}.csv`;
+    await storage.putObject(key, lines.join("\r\n"), "text/csv");
+    await db
+      .update(tables.imports)
+      .set({ errorReportKey: key, updatedAt: new Date() })
+      .where(eq(tables.imports.id, imp.id));
+  }
+
+  const url = await storage.presignDownload(key, 600);
+  res.json({ url, expiresInSeconds: 600 });
+});
+
+// live progress stream (SSE) — snapshot every second until terminal (docs/02 §9)
+importsRouter.get("/:id/events", async (req, res) => {
+  const imp = await loadImport(req.auth!.workspaceId, req.params.id);
+  const snapshot = (i: typeof imp) => ({
+    status: i.status,
+    rowCount: i.rowCount,
+    validCount: i.validCount,
+    invalidCount: i.invalidCount,
+    excludedCount: i.excludedCount,
+    deliveredCount: i.deliveredCount,
+    acceptedCount: i.acceptedCount,
+    rejectedCount: i.rejectedCount,
+    failureReason: i.failureReason,
+  });
+  const terminal = ["completed", "failed", "rolled_back", "cancelled"];
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify(snapshot(imp))}\n\n`);
+  if (terminal.includes(imp.status)) {
+    res.end();
+    return;
+  }
+
+  const timer = setInterval(() => {
+    void (async () => {
+      const [current] = await db
+        .select()
+        .from(tables.imports)
+        .where(eq(tables.imports.id, imp.id))
+        .limit(1);
+      if (!current) {
+        clearInterval(timer);
+        res.end();
+        return;
+      }
+      res.write(`data: ${JSON.stringify(snapshot(current))}\n\n`);
+      if (terminal.includes(current.status)) {
+        clearInterval(timer);
+        res.end();
+      }
+    })().catch(() => {
+      clearInterval(timer);
+      res.end();
+    });
+  }, 1000);
+  req.on("close", () => clearInterval(timer));
 });
 
 // pull-mode row fetch with keyset cursor (docs/02 §8)

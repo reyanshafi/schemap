@@ -25,10 +25,14 @@ export function storageConfigFromEnv(): StorageConfig {
 
 export interface Storage {
   bucket: string;
-  /** Presigned PUT URL — the browser uploads directly, never through our API (docs/02 §4.2). */
+  /** Presigned PUT URL — the browser uploads directly, never through our API. */
   presignUpload(key: string, expiresInSeconds?: number): Promise<string>;
-  /** Stream a stored object — parsing is streaming-only, never full-file loads (docs/02 §1). */
+  /** Stream a stored object — parsing is streaming-only, never full-file loads. */
   getObjectStream(key: string): Promise<Readable>;
+  /** Server-side write (error reports). */
+  putObject(key: string, body: string | Buffer, contentType?: string): Promise<void>;
+  /** Presigned GET URL (error-report downloads). */
+  presignDownload(key: string, expiresInSeconds?: number): Promise<string>;
 }
 
 export function createStorage(cfg: StorageConfig = storageConfigFromEnv()): Storage {
@@ -50,6 +54,16 @@ export function createStorage(cfg: StorageConfig = storageConfigFromEnv()): Stor
       const res = await client.send(new GetObjectCommand({ Bucket: cfg.bucket, Key: key }));
       if (!res.Body) throw new Error(`Object ${key} has no body`);
       return res.Body as Readable;
+    },
+    async putObject(key, body, contentType = "application/octet-stream") {
+      await client.send(
+        new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: body, ContentType: contentType }),
+      );
+    },
+    presignDownload(key, expiresInSeconds = 600) {
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: cfg.bucket, Key: key }), {
+        expiresIn: expiresInSeconds,
+      });
     },
   };
 }
